@@ -28,7 +28,7 @@
 </div>
 <script src="ortak.js"></script>
 <script>
-const W=360,H=600,R=18,CAP=56,START=28,MIN_FIELD=26,COMBO_S=2.5,FEVER_AT=5,FUSE=10*60,LEVEL_S=25,LIVES=3,KEY='kement3';
+const W=360,H=600,R=18,CAP=56,START=28,MIN_FIELD=26,COMBO_S=2.5,FEVER_AT=5,FUSE=10*60,LEVEL_S=20,LIVES=3,KEY='kement3';
 const SNAP=40,NEAR=90,SKIP=15,EDGE=R*.8; // auto-close distance, preview distance, recent trail points ignored, how far the line's "magnet" reaches
 const COLORS=['#ff5d73','#ffd23f','#4f8bff','#3ddc84','#a970ff'];
 const SPR=[...COLORS,'#ffffff'].map(ballSprite); // last one = joker
@@ -37,7 +37,7 @@ const LEVEL_MSG={2:'💣 Bombalar geldi: patlamadan halkala!',3:'🌈 Prizma gel
 const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,H,6);
 const stars=Array.from({length:44},()=>({x:Math.random()*W,y:Math.random()*H,v:.15+Math.random()*.35,s:.6+Math.random()*1.4}));
 let Rn,lives,dots,spawns,score,disp,shown,combo,maxCombo,biggest,lastHit,gt,lt,level,nextSpawn,lastSpawn,frozenUntil,over,path,live,flashA,flashC,punch,quake,hitstop,
-  rings,poppers,parts,flashes,ghosts,beatAt,defused,milestone,recordShown,popN=0,lastArr=0,lastPop=0;
+  rings,poppers,parts,flashes,ghosts,beatAt,defused,milestone,recordShown,startBest,popN=0,lastArr=0,lastPop=0;
 
 function inPoly(p,poly){let ins=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];
   if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)ins=!ins}return ins}
@@ -69,10 +69,10 @@ function freeSpot(){let x,y;for(let k=0;k<25;k++){x=R+Rn()*(W-2*R);y=R+Rn()*(H-2
   if(dots.every(o=>Math.hypot(o.x-x,o.y-y)>2*R+8)&&spawns.every(o=>Math.hypot(o.x-x,o.y-y)>2*R+8))break}return[x,y]}
 const makeDot=(it,x,y,sz=.2)=>({...it,x,y,vx:(Rn()-.5)*.5,vy:(Rn()-.5)*.5,hot:0,ph:Rn()*6.28,sz,sq:0,kx:0,ky:0});
 function queueSpawn(){const[x,y]=freeSpot();spawns.push({it:placeItem(newItem(),x,y),x,y,t:22})}
-const basePace=()=>Math.max(.35,1.3-(level-1)*.09), speedK=()=>Math.min(1.4,1+(level-1)*.06);
+const basePace=()=>Math.max(.2,.95-(level-1)*.075), speedK=()=>Math.min(1.4,1+(level-1)*.06);
 const crowd=()=>(dots.length+spawns.length)/CAP, feverOn=()=>combo>=FEVER_AT, colOf=d=>d.c<0?'#ffffff':COLORS[d.c];
 
-function start(){Rn=rng(DAY+'-'+KEY);lives=LIVES;dots=[];spawns=[];level=1;gt=lt=0;
+function start(){Rn=rng(DAY+'-'+KEY);lives=LIVES;startBest=bestOf(KEY);dots=[];spawns=[];level=1;gt=lt=0;
   for(let i=0;i<START;i++){const[x,y]=freeSpot();dots.push(makeDot(placeItem(newItem(),x,y),x,y,1))}
   nextSpawn=1.2;lastSpawn=0;frozenUntil=0;score=disp=shown=combo=maxCombo=biggest=lastHit=flashA=punch=quake=hitstop=beatAt=defused=0;milestone=1500;recordShown=over=false;path=live=null;
   rings=[];poppers=[];parts=[];flashes=[];ghosts=[];flashC='#fff';hud()}
@@ -120,7 +120,7 @@ function resolve(poly){const j=judge(poly);if(!j.ins.length)return;
   for(let grew=true;grew;){grew=false;for(const d of[...kill])if(!fired.includes(d)&&(d.sp==='bomb'||d.sp==='prism'||d.sp==='ice')){fired.push(d);if(d.sp==='ice')continue;
     for(const o of dots)if(!kill.has(o)&&(d.sp==='bomb'?Math.hypot(o.x-d.x,o.y-d.y)<100:o.c===d.c)){kill.add(o);grew=true}}}
   const n=got.length,k=kill.size;combo++;maxCombo=Math.max(maxCombo,combo);biggest=Math.max(biggest,k);lastHit=gt;
-  const gain=(n*n*5+(k-n)*15)*Math.min(combo,10)*(feverOn()?2:1);score+=gain; // multiplier capped at x10
+  const gain=(n*n*5+(k-n)*15)*Math.min(combo,10)*(feverOn()?2:1);score+=gain;keepBest(KEY,score); // multiplier capped at x10; best saved right away so leaving mid-game keeps it
   defused+=fired.filter(d=>d.sp==='bomb').length;
   const col=got.find(d=>d.c>=0)?COLORS[got.find(d=>d.c>=0).c]:'#ffffff';
   // balloons pop where they are: the loop's catch goes pa-pa-pa around the ring, bomb/prism extras ripple outward
@@ -161,7 +161,7 @@ function fwBurst(x,y,color){const cols=[color,'#ffffff',COLORS[Math.random()*5|0
   rings.push({x,y,r:4,max:70,col:color,t:0});flashes.push({x,y,t:0});popSfx(.45,600+Math.random()*400,.25);buzz(40)}
 function banner(text,color){float(text,W/2,H*.33,color,40);sweep(600,1800,.35,'triangle',.07);buzz([40,30,40,30,120])}
 function milestones(){while(score>=milestone){banner('⭐ '+milestone+' PUAN!','#ffcc33');fireworks(2);milestone+=milestone<6000?1500:3000}
-  const b=bestOf(KEY);if(!recordShown&&b>0&&score>b){recordShown=true;setTimeout(()=>{banner('🏆 YENİ REKOR!','#ff7ad9');fireworks(5)},400)}}
+  if(!recordShown&&startBest>0&&score>startBest){recordShown=true;setTimeout(()=>{banner('🏆 YENİ REKOR!','#ff7ad9');fireworks(5)},400)}}
 function explode(cx,cy,col,n,gain){
   burst(cx,cy,col,10+n*4);
   rings.push({x:cx,y:cy,r:R,max:50+n*15,col,t:0});rings.push({x:cx,y:cy,r:R,max:30+n*8,col:'#ffffff',t:-3});if(n>=5)rings.push({x:cx,y:cy,r:R,max:90+n*16,col,t:-7});
@@ -190,8 +190,8 @@ function levelUp(){float('SEVİYE '+level,W/2,H*.4,'#26c6da',42);if(LEVEL_MSG[le
   sweep(400,1600,.5,'triangle',.08);fireworks(3);buzz([50,40,50,40,140]);bump($('#lvl'));hud()}
 function gameOver(){over=true;path=live=null;float('ALAN DOLDU!',W/2,H*.42,'#ff5d73',38);sweep(500,80,.8,'sawtooth',.1);buzz([250,80,250,80,450]);quake=14;
   [...dots].sort((a,b)=>a.y-b.y).forEach((d,i)=>poppers.push({...d,t:30+i*2,i:i%11,pts:0}));const k=dots.length;dots=[];spawns=[];
-  const rec=score>bestOf(KEY);if(rec)setTimeout(()=>fireworks(6),900);
-  setTimeout(()=>{disp=score;finish({key:KEY,score,title:rec?'Yeni rekor! 🎉':'Alan doldu!',chips:['📈 seviye '+level,'⭕ en büyük: '+biggest,'🔥 x'+maxCombo+' kombo','💣 '+defused+' bomba'],
+  const rec=score>startBest;if(rec)setTimeout(()=>fireworks(6),900);
+  setTimeout(()=>{disp=score;finish({key:KEY,score,prev:startBest,title:rec?'Yeni rekor! 🎉':'Alan doldu!',chips:['📈 seviye '+level,'⭕ en büyük: '+biggest,'🔥 x'+maxCombo+' kombo','💣 '+defused+' bomba'],
     card:`📈 Sv ${level} · ⭕ ${biggest}'li · 🔥 x${maxCombo}\n`,again:start})},Math.max(rec?2600:1800,(30+k*2)*17+600))}
 
 function step(){if(!dots)return;if(hitstop>0){hitstop--;return} // hit-stop: the world holds its breath for a beat

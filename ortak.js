@@ -11,7 +11,9 @@ const TODAY=new Date().toLocaleDateString('sv');
 const DAY=/^\d{4}-\d{2}-\d{2}$/.test(Q.get('g')||'')?Q.get('g'):TODAY;
 const TARGET=(h=>h>0&&h<1e7?h:0)(parseInt(Q.get('h'),10)||0);
 const DAY_LABEL=new Date(DAY+'T12:00').toLocaleDateString('tr',{day:'numeric',month:'long'});
-const bestOf=key=>+store.get(key+'-best-'+DAY)||0;
+// all-time best (also reads the older per-day value so nothing already earned is lost)
+const bestOf=key=>Math.max(+store.get(key+'-best')||0,+store.get(key+'-best-'+DAY)||0);
+const keepBest=(key,score)=>{if(score>bestOf(key))store.set(key+'-best',score)};
 
 let ac,muted=store.get('mute')==='1';
 function sweep(f0,f1,d=.2,type='sine',v=.12){if(muted)return;try{ac??=new AudioContext();const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
@@ -43,12 +45,13 @@ if(document.body.classList.contains('game')){
 }
 
 // end screen: saves the day's best, compares with the friend's target, wires share/again
-function finish({key,score,title,chips,fmt=String,unit='puan',card='',again}){
-  const show=x=>fmt(x)+(unit?' '+unit:''),prev=bestOf(key);if(score>prev)store.set(key+'-best-'+DAY,score);
+// prev: the best before this game started (a game that saves its best while playing passes it in)
+function finish({key,score,title,chips,fmt=String,unit='puan',card='',again,prev=bestOf(key)}){
+  const show=x=>fmt(x)+(unit?' '+unit:'');keepBest(key,score);
   $('#oTitle').textContent=title;$('#oScore').textContent=fmt(score);$('#oUnit').textContent=unit;
   $('#oChips').innerHTML=chips.map(c=>`<span>${c}</span>`).join('');
   const vs=!TARGET?'':score>TARGET?`🏆 Arkadaşını <b>${show(score-TARGET)}</b> farkla geçtin!`:score===TARGET?'🤝 Berabere!':`😬 Hedefe <b>${show(TARGET-score)}</b> kaldı. Bir daha?`;
-  const rec=score>prev?'⭐ Bugünün yeni rekoru!':`Bugünkü rekorun: <b>${show(prev)}</b>`;
+  const rec=score>prev?'⭐ Yeni rekor!':`Rekorun: <b>${show(prev)}</b>`;
   $('#oMsg').innerHTML=[vs,rec].filter(Boolean).join('<br>');
   const url=`${location.origin}${location.pathname}?g=${DAY}&h=${score}`;
   $('#share').onclick=()=>share(`${document.title} · ${DAY_LABEL}\n${card}${show(score)}\nBeni geçebilir misin? 👉 ${url}`);
