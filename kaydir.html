@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Kaydır</title>
+<link rel="stylesheet" href="ortak.css">
+</head>
+<body class="game">
+<div id="app">
+  <header class="hud">
+    <div class="stat"><small>REKOR</small><b id="best">0</b></div>
+    <div class="score"><b id="score">0</b><small id="sub"></small></div>
+    <div class="stat"><small>HAMLE</small><b id="moves">20</b></div>
+  </header>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <p id="hint">Satırı ya da sütunu kaydır, 3'lü diz · kendi 4'lün +1 hamle · 5'li veya köşe ⭐ yıldız yapar</p>
+</div>
+<script src="ortak.js"></script>
+<script>
+const N=6,S=56,W=N*S,H=W,START_MOVES=20;
+const COLORS=['#ff5d73','#ffd23f','#4f8bff','#3ddc84','#a970ff'];
+const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,H,8);
+// g[r*N+c] = {k: colour, star}; fall[j] = rows a tile still has to drop (drawn offset)
+let Rn,g,fall,score,shown,moves,over,busy,drag,slide,flash,chainMax,starsFired;
+
+const rnd=()=>({k:Rn()*COLORS.length|0,star:false});
+function findRuns(b){const runs=[];
+  for(let r=0;r<N;r++){let s=0;for(let c=1;c<=N;c++){if(c<N&&b[r*N+c].k===b[r*N+s].k)continue;if(c-s>=3)runs.push(Array.from({length:c-s},(_,i)=>r*N+s+i));s=c}}
+  for(let c=0;c<N;c++){let s=0;for(let r=1;r<=N;r++){if(r<N&&b[r*N+c].k===b[s*N+c].k)continue;if(r-s>=3)runs.push(Array.from({length:r-s},(_,i)=>(s+i)*N+c));s=r}}
+  return runs}
+// shift a row/column by k cells (positive = right/down), wrapping around
+function shifted(b,axis,idx,k){const nb=b.slice();for(let i=0;i<N;i++){const j=((i-k)%N+N)%N;if(axis==='row')nb[idx*N+i]=b[idx*N+j];else nb[i*N+idx]=b[j*N+idx]}return nb}
+function hasMove(b){for(const axis of['row','col'])for(let idx=0;idx<N;idx++)for(let k=1;k<N;k++)if(findRuns(shifted(b,axis,idx,k)).length)return true;return false}
+function fresh(){let b;do{b=[];for(let j=0;j<N*N;j++){let t;do t=rnd();while((j%N>=2&&b[j-1].k===t.k&&b[j-2].k===t.k)||(j>=2*N&&b[j-N].k===t.k&&b[j-2*N].k===t.k));b.push(t)}}while(!hasMove(b));return b}
+// self-check: runs, wrap-around shift
+{const b=Array.from({length:36},(_,j)=>({k:(j%N+(j/N|0)*2)%5}));b[0].k=b[1].k=b[2].k=9;
+ console.assert(findRuns(b).some(r=>r.length===3&&r[0]===0),'findRuns');const s=shifted(b,'row',0,1);console.assert(s[1]===b[0]&&s[0]===b[5],'shift')}
+
+function start(){Rn=rng(DAY+'-kaydir');g=fresh();fall=Array(N*N).fill(0);score=shown=chainMax=starsFired=0;moves=START_MOVES;over=busy=false;drag=slide=flash=null;hud()}
+function hud(){$('#best').textContent=Math.max(score,bestOf('kaydir'));$('#moves').textContent=moves;$('#moves').style.color=moves<=3?'#ff5d73':'';
+  $('#prog').style.width=Math.min(100,moves/START_MOVES*100)+'%';$('#sub').textContent=TARGET?(score>TARGET?'✅ Hedefi geçtin':'🎯 Hedef '+TARGET):''}
+
+cv.addEventListener('pointerdown',e=>{if(busy||over||slide)return;const p=toWorld(e,view);if(p.x<0||p.y<0||p.x>=W||p.y>=H)return;
+  cv.setPointerCapture(e.pointerId);drag={x:p.x,y:p.y,r:p.y/S|0,c:p.x/S|0}});
+cv.addEventListener('pointermove',e=>{if(!drag)return;const p=toWorld(e,view),dx=p.x-drag.x,dy=p.y-drag.y;
+  if(!slide&&Math.hypot(dx,dy)>10){const row=Math.abs(dx)>Math.abs(dy);slide={axis:row?'row':'col',idx:row?drag.r:drag.c,off:0,target:null}}
+  if(slide&&slide.target==null)slide.off=(slide.axis==='row'?dx:dy)/S});
+cv.addEventListener('pointerup',()=>{if(!drag)return;drag=null;if(slide&&slide.target==null)release()});
+cv.addEventListener('pointercancel',()=>{drag=null;if(slide&&slide.target==null){slide.target=0;slide.done=null}});
+
+function release(){const k=Math.round(slide.off);busy=true;
+  if(((k%N)+N)%N===0){slide.target=k;slide.done=null;return}
+  const nb=shifted(g,slide.axis,slide.idx,k);
+  if(findRuns(nb).length){slide.target=k;slide.done=()=>{g=nb;moves--;hud();resolve()}}
+  else{slide.target=0;slide.done=null;beep(140,.12,'square',.05);buzz(30)}} // no match: springs back, costs nothing
+
+async function resolve(){busy=true;let chain=0;
+  for(let runs;(runs=findRuns(g)).length;){chain++;
+    const clear=new Set(runs.flat()),hits={};runs.flat().forEach(j=>hits[j]=(hits[j]||0)+1);
+    // a 5-run or an L/T crossing leaves a star behind; a matched star blasts its row and column
+    const born=new Set();for(const run of runs)if(run.length>=5)born.add(run[run.length>>1]);for(const j in hits)if(hits[j]>1)born.add(+j);
+    const fired=new Set();for(let grew=true;grew;){grew=false;for(const j of[...clear])if(g[j].star&&!fired.has(j)){fired.add(j);const r=j/N|0,c=j%N;
+      for(let i=0;i<N;i++)for(const q of[r*N+i,i*N+c])if(!clear.has(q)){clear.add(q);grew=true}}}
+    born.forEach(j=>{if(!fired.has(j))clear.delete(j)});
+    flash=clear;await sleep(140);flash=null;
+    let bonus=0;if(chain===1)for(const run of runs)bonus+=run.length>=5?2:run.length===4?1:0; // only the player's own move earns moves; cascades earn points
+    const gain=clear.size*10*chain+fired.size*60;score+=gain;moves+=bonus;starsFired+=fired.size;
+    let sx=0,sy=0;clear.forEach(j=>{const x=(j%N+.5)*S,y=((j/N|0)+.5)*S;sx+=x;sy+=y;burst(x,y,COLORS[g[j].k],5)});sx/=clear.size;sy/=clear.size;
+    float('+'+gain,sx,sy,'#fff',24);if(bonus)float('+'+bonus+' hamle',sx,sy+30,'#3ddc84',20);
+    if(chain>1)praise(chain-2,W/2,H*.38);if(fired.size){shake();float('⭐ YILDIZ PATLADI!',W/2,H*.22,'#ffcc33',26)}
+    born.forEach(j=>{if(!fired.has(j)){g[j]={k:g[j].k,star:true};float('⭐',(j%N+.5)*S,(j/N|0)*S,'#ffcc33',26)}});
+    for(let k=0;k<4;k++)setTimeout(()=>beep(392*2**((k*3+chain*2)/12),.1,'triangle',.09),k*45);buzz(chain>1||fired.size?[20,30,40]:18);
+    clear.forEach(j=>g[j]=null);
+    for(let c=0;c<N;c++){let w=N-1;for(let r=N-1;r>=0;r--){const t=g[r*N+c];if(t){if(w!==r){g[w*N+c]=t;g[r*N+c]=null;fall[w*N+c]=w-r}w--}}
+      for(let r=w;r>=0;r--){g[r*N+c]=rnd();fall[r*N+c]=w+1}}
+    hud();await sleep(300)}
+  chainMax=Math.max(chainMax,chain);
+  if(!hasMove(g)){g=fresh();fall.fill(3);toast('🔀 Hamle kalmadı, karıştırıldı')}
+  busy=false;hud();if(moves<=0)end()}
+function end(){over=true;
+  setTimeout(()=>finish({key:'kaydir',score,title:'Hamlen bitti!',chips:['🔗 en uzun zincir: x'+chainMax,'⭐ '+starsFired+' yıldız patladı'],card:`🔗 x${chainMax} zincir · ⭐ ${starsFired}\n`,again:start}),600)}
+
+function step(){if(!g)return;for(let j=0;j<fall.length;j++)fall[j]=Math.max(0,fall[j]*.82-.03);
+  if(slide&&slide.target!=null){slide.off+=(slide.target-slide.off)*.35;
+    if(Math.abs(slide.target-slide.off)<.02){const done=slide.done;slide=null;if(done)done();else busy=false}}}
+
+function gem(t,x,y,j){const px=x*S,py=y*S;ctx.drawImage(tileSprite(COLORS[t.k],SYMS[t.k]),px+3,py+3,S-6,S-6);
+  if(t.star){ctx.save();ctx.shadowColor='#ffcc33';ctx.shadowBlur=12;ctx.strokeStyle='#ffe58a';ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(px+4,py+4,S-8,S-8,12);ctx.stroke();ctx.restore();
+    ctx.fillStyle='#fff';ctx.font='800 18px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('★',px+S-14,py+14)}
+  if(flash?.has(j)){ctx.fillStyle='rgba(255,255,255,.75)';ctx.beginPath();ctx.roundRect(px+3,py+3,S-6,S-6,12);ctx.fill()}}
+
+function draw(){const v=view;if(!v.s||!g)return;worldView(ctx,cv,v);
+  ctx.fillStyle='#141829';ctx.strokeStyle='#2a3150';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(-6,-6,W+12,H+12,16);ctx.fill();ctx.stroke();
+  ctx.save();ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();
+  if(slide){ctx.fillStyle='rgba(255,255,255,.06)';slide.axis==='row'?ctx.fillRect(0,slide.idx*S,W,S):ctx.fillRect(slide.idx*S,0,S,H)}
+  for(let j=0;j<N*N;j++){const t=g[j];if(!t)continue;const r=j/N|0,c=j%N;
+    if(slide&&(slide.axis==='row'?r===slide.idx:c===slide.idx)){const p=(slide.axis==='row'?c:r)+slide.off;
+      for(const q of[p-N,p,p+N]){if(q<=-1||q>=N)continue;slide.axis==='row'?gem(t,q,r,j):gem(t,c,q,j)}continue} // wrap: tiles leaving one edge enter the other
+    gem(t,c,r-fall[j],j)}
+  ctx.restore();drawFx(ctx);
+  if(shown<score)shown+=Math.ceil((score-shown)/6);else shown=score;$('#score').textContent=shown}
+
+start();loop(step,draw);
+</script>
+</body>
+</html>

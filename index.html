@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Günün Oyunları</title>
+<link rel="stylesheet" href="ortak.css">
+<style>
+.hubw{max-width:440px;margin:0 auto;padding:max(28px,env(safe-area-inset-top)) 16px 32px;display:flex;flex-direction:column;gap:14px}
+.kicker{color:var(--dim);font-size:13px;letter-spacing:.04em}
+h1{font-size:30px;line-height:1.15}
+.lead{color:var(--dim);line-height:1.5;margin-bottom:8px}
+.sec{font-size:11px;font-weight:700;letter-spacing:.12em;color:var(--dim);margin-top:10px}
+.gc{display:flex;align-items:center;gap:14px;padding:16px;border-radius:20px;background:var(--panel);box-shadow:inset 0 0 0 1px var(--line);color:var(--text);text-decoration:none;transition:transform .15s}
+.gc:active{transform:scale(.98)}
+.gc i{font-style:normal;font-size:28px;width:56px;height:56px;flex:none;border-radius:16px;display:grid;place-items:center;background:color-mix(in srgb,var(--c) 20%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--c) 45%,transparent)}
+.gc div{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.gc b{font-size:19px}
+.gc small{color:var(--dim);font-size:13px;line-height:1.35}
+.gc em{font-style:normal;font-size:12px;font-weight:700;color:var(--accent);white-space:nowrap}
+</style>
+</head>
+<body class="hub">
+<main class="hubw">
+  <p class="kicker">GÜNÜN OYUNLARI · <span id="d"></span></p>
+  <h1>Bugün kim kazanacak?</h1>
+  <p class="lead">Her gün herkese aynı bölüm gelir. Oyna, skorunu linkle gönder, arkadaşın geçmeye çalışsın.</p>
+  <p class="sec">YENİ · SÜRESİZ, TAHTA DOLANA KADAR</p>
+  <a class="gc" href="kement.html" style="--c:#ff5d73"><i>⭕</i><div><b>Kement</b><small>Kesintisiz halka çiz, bombaları yakala · alan dolmasın</small></div><em id="b-kement3"></em></a>
+  <a class="gc" href="patlat.html" style="--c:#ff5d73"><i>💥</i><div><b>Patlat</b><small>Aynı renk grupları patlat, alttan gelen sıralara yetiş</small></div><em id="b-patlat"></em></a>
+  <a class="gc" href="birlestir.html" style="--c:#ffd23f"><i>🔢</i><div><b>Birleştir</b><small>3 aynı sayıyı yan yana koy, büyüt, zincirle</small></div><em id="b-birlestir"></em></a>
+  <a class="gc" href="kaydir.html" style="--c:#a970ff"><i>↔️</i><div><b>Kaydır</b><small>Satır-sütun kaydır, 3'lü diz, zincirleme patlat</small></div><em id="b-kaydir"></em></a>
+  <p class="sec">İLK DENEMELER</p>
+  <a class="gc" href="kule.html" style="--c:#4f8bff"><i>🏗️</i><div><b>Kule</b><small>Parçaları üst üste diz, devirme · 30 parça</small></div><em id="b-kule"></em></a>
+  <a class="gc" href="zincir.html" style="--c:#3ddc84"><i>⛓️</i><div><b>Zincir</b><small>Tek dokunuş, zincirleme patlama · 5 bölüm</small></div><em id="b-zincir"></em></a>
+</main>
+<script src="ortak.js"></script>
+<script>
+$('#d').textContent=DAY_LABEL.toLocaleUpperCase('tr');
+const show={patlat:v=>v+' puan',birlestir:v=>v+' puan',kaydir:v=>v+' puan',kement3:v=>v+' puan',kule:v=>(v/100).toFixed(2)+' m',zincir:v=>v+' top'};
+for(const k in show){const v=bestOf(k);$('#b-'+k).textContent=v?'⭐ '+show[k](v):'Oyna →'}
+</script>
+</body>
+</html>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Birleştir</title>
+<link rel="stylesheet" href="ortak.css">
+</head>
+<body class="game">
+<div id="app">
+  <header class="hud">
+    <div class="stat"><small>REKOR</small><b id="best">0</b></div>
+    <div class="score"><b id="score">0</b><small id="sub"></small></div>
+    <div class="stat"><small>EN BÜYÜK</small><b id="max">1</b></div>
+  </header>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <p id="hint">Taşı tahtaya sürükle · 3 aynı sayı yan yana = birleşir · ikili taşa dokun: çevir</p>
+</div>
+<script src="ortak.js"></script>
+<script>
+const N=5,S=64,W=N*S,TRAY=128,H=W+TRAY,TY=W+TRAY/2+6;
+const LV=['#4f8bff','#3ddc84','#ffd23f','#ffb020','#ff5d73','#ff7ad9','#a970ff','#26c6da','#eef0ff'];
+const lvColor=l=>LV[(l-1)%LV.length], darkText=l=>[2,8].includes((l-1)%LV.length);
+const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,H,8);
+let Rn,board,pops,piece,nextP,score,shown,maxLv,merges,over,busy,movers,drag;
+
+function newPiece(){const lv=()=>{const x=Rn();return x<.5?1:x<.8?2:3};return Rn()<.35?{t:[lv(),lv()],rot:0}:{t:[lv()],rot:0}}
+const cellsOf=(p,r,c)=>p.t.length<2?[[r,c]]:p.rot?[[r,c],[r+1,c]]:[[r,c],[r,c+1]];
+const fits=(p,r,c)=>cellsOf(p,r,c).every(([y,x])=>y>=0&&y<N&&x>=0&&x<N&&!board[y*N+x]);
+function canPlay(p){for(const rot of p.t.length<2?[0]:[0,1])for(let r=0;r<N;r++)for(let c=0;c<N;c++)if(fits({...p,rot},r,c))return true;return false}
+function group(b,i){const lv=b[i];if(!lv)return[];const out=[i],seen=new Set(out);
+  for(let q=0;q<out.length;q++){const j=out[q],r=j/N|0,c=j%N;for(const k of[r>0&&j-N,r<N-1&&j+N,c>0&&j-1,c<N-1&&j+1])if(k!==false&&!seen.has(k)&&b[k]===lv){seen.add(k);out.push(k)}}return out}
+// self-check: groups stay within rows (no wrap from one row's end to the next)
+{const b=Array(25).fill(0);b[4]=1;b[5]=1;b[0]=2;b[1]=2;b[6]=2;console.assert(group(b,4).length===1&&group(b,0).length===3,'group')}
+
+function start(){Rn=rng(DAY+'-birlestir');board=Array(N*N).fill(0);pops=Array(N*N).fill(0);movers=[];
+  piece=newPiece();nextP=newPiece();score=shown=merges=0;maxLv=1;over=busy=false;drag=null;hud()}
+function hud(){$('#best').textContent=Math.max(score,bestOf('birlestir'));$('#max').textContent=maxLv;
+  $('#prog').style.width=board.filter(Boolean).length/(N*N)*100+'%';$('#sub').textContent=TARGET?(score>TARGET?'✅ Hedefi geçtin':'🎯 Hedef '+TARGET):''}
+
+// piece size/anchor helpers (world units)
+const pSize=p=>p.t.length<2?[S,S]:p.rot?[S,2*S]:[2*S,S];
+function anchorAt(px,py){const[w,h]=pSize(piece);return[Math.round((py-h/2)/S),Math.round((px-w/2)/S)]}
+cv.addEventListener('pointerdown',e=>{if(over||busy)return;const p=toWorld(e,view);if(p.y<W)return;
+  cv.setPointerCapture(e.pointerId);drag={sx:p.x,sy:p.y,x:p.x,y:p.y,moved:false,touch:e.pointerType!=='mouse'}});
+cv.addEventListener('pointermove',e=>{if(!drag)return;const p=toWorld(e,view);if(Math.hypot(p.x-drag.sx,p.y-drag.sy)>8)drag.moved=true;
+  // on touch, hold the piece above the finger so it stays visible
+  drag.x=p.x;drag.y=p.y-(drag.touch&&drag.moved?S*1.3:0)});
+cv.addEventListener('pointerup',()=>{const d=drag;drag=null;if(!d||over||busy)return;
+  if(!d.moved){if(piece.t.length>1){piece.rot^=1;beep(520,.04,'square',.04)}return}
+  const[r,c]=anchorAt(d.x,d.y);if(fits(piece,r,c))place(r,c)});
+cv.addEventListener('pointercancel',()=>drag=null);
+
+async function place(r,c){const cells=cellsOf(piece,r,c).map(([y,x])=>y*N+x);cells.forEach((j,k)=>{board[j]=piece.t[k];pops[j]=1});
+  piece=nextP;nextP=newPiece();beep(300,.05,'triangle');buzz(10);busy=true;hud();
+  let chain=0;
+  for(const q=[...cells];q.length;){const p=q.shift(),lv=board[p];if(!lv)continue;const g=group(board,p);if(g.length<3)continue;
+    chain++;merges++;
+    for(const j of g)if(j!==p){movers.push({from:j,to:p,lv,t:0});board[j]=0}
+    await sleep(170);
+    const nl=lv+1,gain=nl*g.length*10*chain;board[p]=nl;pops[p]=1.4;score+=gain;
+    const x=(p%N+.5)*S,y=((p/N|0)+.5)*S;burst(x,y,lvColor(nl),16);float('+'+gain,x,y-6,'#fff',24);
+    if(nl>maxLv){maxLv=nl;if(nl>=5){toast(`✨ Yeni taş: ${nl}!`);shake()}}
+    if(chain>1)praise(chain-2,W/2,W*.42);
+    beep(262*2**((nl+chain*2)/12),.16,'triangle',.11);buzz(chain>1?[20,30,40]:20);hud();
+    q.unshift(p);await sleep(110)} // the new tile may complete another trio: keep merging
+  busy=false;hud();if(!canPlay(piece))end()}
+function end(){over=true;
+  setTimeout(()=>finish({key:'birlestir',score,title:'Tahtada yer kalmadı!',chips:['💎 en büyük taş: '+maxLv,'🔗 '+merges+' birleşme'],card:`💎 ${maxLv}'lık taş · 🔗 ${merges} birleşme\n`,again:start}),600)}
+
+function step(){if(!board)return;for(let j=0;j<pops.length;j++)pops[j]=Math.max(0,pops[j]-.08);for(const m of movers)m.t++;movers=movers.filter(m=>m.t<11)}
+
+function drawLv(lv,x,y,s,a=1){ctx.globalAlpha=a;ctx.drawImage(tileSprite(lvColor(lv)),x+3,y+3,s-6,s-6);
+  ctx.fillStyle=darkText(lv)?'#1d2033':'#fff';ctx.font=`900 ${s*.42}px system-ui`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(lv,x+s/2,y+s/2+2);ctx.globalAlpha=1}
+function drawPiece(p,cx,cy,s,a=1){const[w,h]=pSize(p).map(v=>v*s/S);p.t.forEach((lv,k)=>drawLv(lv,cx-w/2+(p.rot?0:k*s),cy-h/2+(p.rot?k*s:0),s,a))}
+
+function draw(){const v=view;if(!v.s||!board)return;const now=performance.now();worldView(ctx,cv,v);
+  ctx.fillStyle='#141829';ctx.strokeStyle='#2a3150';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(-6,-6,W+12,W+12,16);ctx.fill();ctx.stroke();
+  for(let j=0;j<N*N;j++){const x=(j%N)*S,y=(j/N|0)*S;ctx.fillStyle='#1d2238';ctx.beginPath();ctx.roundRect(x+3,y+3,S-6,S-6,12);ctx.fill()}
+  // drag preview: ghost + glow on every tile that would merge
+  let ghost=null;
+  if(drag?.moved){const[r,c]=anchorAt(drag.x,drag.y);if(fits(piece,r,c)){ghost=cellsOf(piece,r,c).map(([y,x])=>y*N+x);
+    const b=board.slice();ghost.forEach((j,k)=>b[j]=piece.t[k]);const hot=new Set();ghost.forEach(j=>{const g=group(b,j);if(g.length>=3)g.forEach(q=>hot.add(q))});
+    ghost.forEach((j,k)=>drawLv(piece.t[k],(j%N)*S,(j/N|0)*S,S,.35));
+    ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.globalAlpha=.6+.4*Math.sin(now/120);hot.forEach(j=>{ctx.beginPath();ctx.roundRect((j%N)*S+3,(j/N|0)*S+3,S-6,S-6,12);ctx.stroke()});ctx.globalAlpha=1}}
+  for(let j=0;j<N*N;j++)if(board[j]){const z=1+pops[j]*.18,s=S*z,o=(s-S)/2;drawLv(board[j],(j%N)*S-o,(j/N|0)*S-o,s)}
+  for(const m of movers){const k=m.t/10,e=k*k,x=((m.from%N)+((m.to%N)-(m.from%N))*e)*S,y=((m.from/N|0)+((m.to/N|0)-(m.from/N|0))*e)*S;drawLv(m.lv,x,y,S,1-k*.5)}
+  // tray
+  ctx.fillStyle='#8a90b3';ctx.font='700 10px system-ui';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('SIRADAKİ',W-56,W+26);
+  drawPiece(nextP,W-34,TY,S*.45,.8);
+  if(!drag?.moved&&!over){drawPiece(piece,W/2,TY,S*.9);if(piece.t.length>1){ctx.fillStyle='#8a90b3';ctx.textAlign='center';ctx.fillText('↻ dokun: çevir',W/2,H-6)}}
+  if(drag?.moved)drawPiece(piece,drag.x,drag.y,S,.95);
+  drawFx(ctx);
+  if(shown<score)shown+=Math.ceil((score-shown)/6);else shown=score;$('#score').textContent=shown}
+
+start();loop(step,draw);
+</script>
+</body>
+</html>

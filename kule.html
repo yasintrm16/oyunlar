@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Kule</title>
+<link rel="stylesheet" href="ortak.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+</head>
+<body class="game">
+<div id="app">
+  <header class="hud">
+    <div class="stat"><small>REKOR</small><b id="best">0</b></div>
+    <div class="score"><b id="score">0.00 m</b><small id="sub"></small></div>
+    <div class="stat"><small>PARÇA</small><b id="left">30</b></div>
+  </header>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <p id="hint">Sürükle-bırak: düşür · Dokun: döndür · 3 parça düşerse biter</p>
+</div>
+<script src="ortak.js"></script>
+<script>
+const{Engine,Bodies,Body,Composite}=Matter;
+const W=360,U=26,TOTAL=30,LIVES=3,PW=240,DROP=25; // DROP: gap between piece's lowest point and tower top
+const SHAPES=['1','11','111','1111','11111','11/11','10/11','111/010','011/110','110/011','100/111','001/111','111/101','tri'];
+const COLORS=['#ff5d73','#ffb020','#ffe14d','#3ddc84','#26c6da','#4f8bff','#a970ff','#ff7ad9'];
+const OPT={friction:1,frictionStatic:2,frictionAir:.015,restitution:0,density:.002};
+const cm=y=>Math.max(0,Math.round(-y/U*50)), fmt=c=>(c/100).toFixed(2)+' m'; // one block = 50 cm
+const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,0);
+let engine,seq,dropped,cur,curX,curA,dispA,hy,camTop,peak,fallen,n,over,lastDrop,shown,drag,passedT,passedB;
+
+function makeBody(p){let b;
+  if(p.s==='tri')b=Bodies.polygon(0,0,3,U*1.15,{...OPT,chamfer:{radius:3}});
+  else{const ps=[];p.s.split('/').forEach((row,r)=>[...row].forEach((ch,c)=>ch==='1'&&ps.push(Bodies.rectangle(c*U,r*U,U,U,{chamfer:{radius:3}}))));
+    b=ps.length>1?Body.create({parts:ps,...OPT}):Bodies.rectangle(0,0,U,U,{...OPT,chamfer:{radius:3}})}
+  b.color=p.color;b.rest=0;return b}
+
+function start(){engine=Engine.create({enableSleeping:true});engine.positionIterations=10;engine.velocityIterations=8;
+  Composite.add(engine.world,Bodies.rectangle(W/2,15,PW,30,{isStatic:true,friction:1,frictionStatic:2}));
+  const Rn=rng(DAY+'-kule');seq=Array.from({length:TOTAL},()=>({s:SHAPES[Rn()*SHAPES.length|0],color:COLORS[Rn()*COLORS.length|0]}));
+  dropped=[];n=fallen=peak=shown=0;hy=-80;camTop=null;over=passedT=passedB=false;drag=null;spawn();hud()}
+function spawn(){cur=makeBody(seq[n]);curX=W/2;curA=dispA=0}
+function hud(){$('#left').textContent=TOTAL-n;$('#prog').style.width=n/TOTAL*100+'%';
+  $('#sub').textContent='❤️'.repeat(LIVES-fallen)+'🖤'.repeat(fallen)+(TARGET?' · 🎯 '+fmt(TARGET):'')}
+
+// drag anywhere moves the piece (thumb never covers it); release drops; a tap rotates
+cv.addEventListener('pointerdown',e=>{if(!cur||over)return;cv.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,cx:curX,moved:false}});
+cv.addEventListener('pointermove',e=>{if(!drag||!cur)return;if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>8)drag.moved=true;
+  if(drag.moved)curX=clamp(drag.cx+(e.clientX-drag.x)/view.s,10,W-10)});
+cv.addEventListener('pointerup',()=>{const d=drag;drag=null;if(!d||!cur||over)return;if(d.moved)drop();else{curA+=Math.PI/2;beep(520,.04,'square',.04)}});
+cv.addEventListener('pointercancel',()=>drag=null);
+
+const hoverY=()=>peak-DROP-(cur.bounds.max.y-cur.position.y);
+function drop(){Body.setAngle(cur,curA);Body.setPosition(cur,{x:curX,y:Math.min(hy,hoverY())});Composite.add(engine.world,cur);
+  dropped.push(cur);cur=null;n++;lastDrop=performance.now();beep(260,.06,'triangle');buzz(10);hud()}
+
+function end(title){if(over)return;over=true;drag=null;
+  setTimeout(()=>finish({key:'kule',score:cm(peak),fmt,unit:'',title,chips:[`🧱 ${dropped.length} parça ayakta`,`💔 ${fallen} düştü`],card:`🏗️ ${dropped.length} parça · 💔 ${fallen}\n`,again:start}),1200)}
+
+function step(){if(!engine)return;Engine.update(engine,1000/60);const now=performance.now();let t=0;
+  for(let i=dropped.length;i--;){const b=dropped[i];
+    if(b.position.y>500){Composite.remove(engine.world,b);dropped.splice(i,1);
+      if(!over){fallen++;toast('💔 Bir parça düştü!');buzz([60,40,60]);beep(110,.3,'sawtooth',.08);shake();hud();if(fallen>=LIVES)end('3 parça düştü!')}continue}
+    // a piece counts toward height once it has stood still for a moment, and keeps counting
+    // through the small wobble of a landing above it; only real sliding/tipping un-settles it
+    b.rest=b.isSleeping||(b.speed<.15&&Math.abs(b.angularVelocity)<.01)?b.rest+1:0;
+    if(b.rest>20)b.settled=true;else if(b.speed>1.5||Math.abs(b.angularVelocity)>.08)b.settled=false;
+    if(b.settled&&b.bounds.max.y<5)t=Math.min(t,b.bounds.min.y)}
+  peak=t;
+  const h=cm(peak),best=bestOf('kule');
+  if(!over&&best&&h>best&&!passedB){passedB=true;toast('⭐ Rekorunu geçtin!')}
+  if(!over&&TARGET&&h>TARGET&&!passedT){passedT=true;toast('🏆 Arkadaşını geçtin!');shake()}
+  if(cur){dispA+=(curA-dispA)*.3;Body.setAngle(cur,dispA);hy+=(hoverY()-hy)*.15;Body.setPosition(cur,{x:curX,y:hy})}
+  else if(!over&&n<TOTAL){const last=dropped[dropped.length-1];if(!last||last.settled||now-lastDrop>2500)spawn()}
+  else if(!over&&n===TOTAL&&(dropped.every(b=>b.settled)||now-lastDrop>4000))end('30 parçanın hepsi dizildi!')}
+
+function drawBody(b,alpha=1){ctx.globalAlpha=alpha;for(const p of b.parts.length>1?b.parts.slice(1):[b]){
+  ctx.beginPath();p.vertices.forEach((q,i)=>i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y));ctx.closePath();
+  ctx.fillStyle=b.color;ctx.fill();ctx.strokeStyle='rgba(0,0,0,.28)';ctx.lineWidth=2;ctx.stroke()}ctx.globalAlpha=1}
+function hLine(c,label,color){if(!c)return;const y=-c/50*U;ctx.strokeStyle=color;ctx.setLineDash([6,6]);ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=color;ctx.textAlign='right';ctx.fillText(label+' '+fmt(c),W-6,y-3)}
+
+function draw(){const v=view;if(!v.s||!engine)return;const vh=v.r.height/v.s,camT=Math.min(40-vh,hy-110);
+  camTop=camTop==null?camT:camTop+(camT-camTop)*.08;worldView(ctx,cv,v,camTop);
+  ctx.font='600 11px system-ui';ctx.textBaseline='bottom';ctx.textAlign='left';
+  for(let m=1;m<400;m++){const y=-m*2*U;if(y<camTop-10)break;if(y>camTop+vh)continue;
+    ctx.fillStyle='rgba(255,255,255,.05)';ctx.fillRect(0,y,W,1);ctx.fillStyle='rgba(255,255,255,.28)';ctx.fillText(m+' m',6,y-2)}
+  hLine(bestOf('kule'),'⭐ Rekor','#ffcc33');hLine(TARGET,'🎯 Hedef','#ff7ad9');
+  ctx.fillStyle='#232945';ctx.beginPath();ctx.roundRect((W-PW)/2,0,PW,30,6);ctx.fill();ctx.fillStyle='#ffcc33';ctx.fillRect((W-PW)/2,0,PW,3);
+  for(const b of dropped)drawBody(b);
+  if(cur){const bd=cur.bounds;ctx.fillStyle='rgba(255,255,255,.05)';ctx.fillRect(bd.min.x,bd.max.y,bd.max.x-bd.min.x,Math.max(0,peak-bd.max.y));drawBody(cur,.9)}
+  drawFx(ctx);
+  const h=cm(peak);shown+=(h-shown)*.2;$('#score').textContent=fmt(Math.round(shown));$('#best').textContent=fmt(Math.max(h,bestOf('kule')))}
+
+start();loop(step,draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0d0f1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Patlat</title>
+<link rel="stylesheet" href="ortak.css">
+</head>
+<body class="game">
+<div id="app">
+  <header class="hud">
+    <div class="stat"><small>REKOR</small><b id="best">0</b></div>
+    <div class="score"><b id="score">0</b><small id="sub"></small></div>
+    <div class="stat"><small>SEVİYE</small><b id="lvl">1</b></div>
+  </header>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="stage"><canvas id="cv"></canvas></div>
+  <p id="hint">Aynı renkte birbirine değen 2+ bloğa dokun · 8'li grup 💣 bomba yapar</p>
+</div>
+<script src="ortak.js"></script>
+<script>
+const COLS=7,ROWS=10,S=50,GH=ROWS*S,W=COLS*S,H=GH+62;
+const COLORS=['#ff5d73','#ffd23f','#4f8bff','#3ddc84','#a970ff'];
+const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,H,8);
+// cols[c] = tiles bottom→top; tile = {k: colour (-1 = bomb), y: drawn row, animates toward its index}
+let Rn,cols,next,fill,rows,score,shown,bestGroup,over,ghosts;
+
+const level=()=>1+Math.floor(rows/5);
+const newRow=()=>Array.from({length:COLS},()=>Rn()*(rows<15?4:5)|0); // 5th colour from level 4
+function groupAt(c,i){const k=cols[c]?.[i]?.k;if(k==null||k<0)return[];const seen=new Set([c+','+i]),out=[[c,i]];
+  for(let q=0;q<out.length;q++){const[x,y]=out[q];for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){const nx=x+dx,ny=y+dy,key=nx+','+ny;
+    if(!seen.has(key)&&cols[nx]?.[ny]?.k===k){seen.add(key);out.push([nx,ny])}}}return out}
+const hasMove=()=>cols.some((col,c)=>col.some((t,i)=>t.k<0||cols[c+1]?.[i]?.k===t.k||col[i+1]?.k===t.k));
+
+function start(){Rn=rng(DAY+'-patlat');rows=0;cols=Array.from({length:COLS},()=>[]);
+  for(let r=0;r<5;r++)newRow().forEach((k,c)=>cols[c].push({k,y:r}));
+  next=newRow();fill=0;score=shown=bestGroup=0;over=false;ghosts=[];hud()}
+// self-check: flood fill finds the connected same-colour group only
+{Rn=rng('t');cols=[[{k:1},{k:1}],[{k:1},{k:2}],[{k:2}]];console.assert(groupAt(0,0).length===3&&groupAt(1,1).length===1&&hasMove(),'groupAt');
+ cols=[[{k:1}],[{k:2}]];console.assert(!hasMove(),'hasMove')}
+
+function hud(){$('#best').textContent=Math.max(score,bestOf('patlat'));$('#lvl').textContent=level();
+  $('#prog').style.width=fill/COLS*100+'%';$('#sub').textContent=TARGET?(score>TARGET?'✅ Hedefi geçtin':'🎯 Hedef '+TARGET):''}
+
+cv.addEventListener('pointerdown',e=>{if(over)return;const p=toWorld(e,view),c=Math.floor(p.x/S),i=Math.floor((GH-p.y)/S),t=cols[c]?.[i];if(!t)return;
+  let gone;
+  if(t.k<0){gone=[];for(let x=c-1;x<=c+1;x++)for(let y=i-1;y<=i+1;y++)if(cols[x]?.[y])gone.push([x,y])}
+  else{gone=groupAt(c,i);if(gone.length<2){t.shake=14;beep(150,.05,'square',.04);return}}
+  pop(gone,c,i,t.k<0)});
+
+function pop(gone,c,i,bomb){const n=gone.length,gain=bomb?n*15:n*n*5;score+=gain;if(!bomb)bestGroup=Math.max(bestGroup,n);
+  const makeBomb=!bomb&&n>=8;if(makeBomb){cols[c][i].k=-1;cols[c][i].born=1}
+  const rm=new Set();
+  for(const[x,y]of gone){const t=cols[x][y];if(makeBomb&&x===c&&y===i)continue;rm.add(t);
+    const col=t.k<0?'#ffffff':COLORS[t.k];ghosts.push({x:x*S,y:GH-(t.y+1)*S,col,t:0});burst(x*S+S/2,GH-(t.y+.5)*S,col,5)}
+  for(let x=0;x<COLS;x++)cols[x]=cols[x].filter(t=>!rm.has(t));
+  const cx=c*S+S/2,cy=GH-(i+.5)*S;float('+'+gain,cx,cy,'#fff',24);
+  const tier=[5,8,11,15,20].filter(v=>n>=v).length-1;if(tier>=0)praise(tier,W/2,GH*.32);
+  if(makeBomb)float('💣 BOMBA!',cx,cy-36,'#ffcc33',22);if(bomb)float('💥',cx,cy,'#fff',60);
+  if(n>=8||bomb){shake();buzz([20,30,40])}else buzz(15);
+  for(let k=0;k<Math.min(n,10);k++)setTimeout(()=>beep(392*2**(k/6),.09,'triangle',.08),k*30);
+  fill+=rows>=30?2:1;if(fill>=COLS)rise();
+  while(!over&&!hasMove())rise(); // nothing left to tap: bring the next row now
+  hud()}
+
+function rise(){if(cols.some(col=>col.length>=ROWS)){end();return}
+  next.forEach((k,c)=>cols[c].unshift({k,y:-1}));rows++;next=newRow();fill=0;beep(90,.15,'sine',.12);buzz(25);
+  if(rows%5===0){toast('📈 Seviye '+level())}
+  if(cols.some(col=>col.length>=ROWS-1))toast('⚠️ Tepeye çok yakın!')}
+function end(){over=true;
+  setTimeout(()=>finish({key:'patlat',score,title:'Bloklar tepeye ulaştı!',chips:['💥 en büyük grup: '+bestGroup,'📈 seviye '+level()],card:`💥 ${bestGroup}'li grup · 📈 Sv ${level()}\n`,again:start}),700)}
+
+function step(){if(!cols)return;
+  for(const col of cols)col.forEach((t,i)=>{t.y+=(i-t.y)*.28;if(Math.abs(i-t.y)<.01)t.y=i;if(t.shake)t.shake--;if(t.born)t.born=Math.max(0,t.born-.05)});
+  for(const g of ghosts)g.t++;ghosts=ghosts.filter(g=>g.t<12)}
+
+function draw(){const v=view;if(!v.s||!cols)return;const now=performance.now();worldView(ctx,cv,v);
+  ctx.fillStyle='#141829';ctx.strokeStyle='#2a3150';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(-4,-4,W+8,GH+8,14);ctx.fill();ctx.stroke();
+  const danger=cols.some(col=>col.length>=ROWS-1);
+  if(danger){ctx.fillStyle=`rgba(255,59,59,${.12+.1*Math.sin(now/150)})`;ctx.fillRect(0,0,W,S)}
+  ctx.save();ctx.beginPath();ctx.rect(0,0,W,GH);ctx.clip();
+  for(let c=0;c<COLS;c++)for(const t of cols[c]){const x=c*S+(t.shake?Math.sin(t.shake*1.4)*3:0),y=GH-(t.y+1)*S,z=1+(t.born||0)*.25,o=(S-4)*(z-1)/2;
+    if(t.k<0){ctx.drawImage(tileSprite('#30365a'),x+2-o,y+2-o,(S-4)*z,(S-4)*z);ctx.font='26px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('💣',x+S/2,y+S/2+1)}
+    else ctx.drawImage(tileSprite(COLORS[t.k],SYMS[t.k]),x+2,y+2,S-4,S-4)}
+  for(const g of ghosts){const k=1-g.t/12,o=(S-4)*(1-k)/2;ctx.globalAlpha=k;ctx.drawImage(tileSprite(g.col),g.x+2+o,g.y+2+o,(S-4)*k,(S-4)*k)}ctx.globalAlpha=1;
+  ctx.restore();
+  // upcoming row: one more cell revealed per tap; when full it pushes in from below
+  ctx.fillStyle='#8a90b3';ctx.font='700 10px system-ui';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('SIRADAKİ SIRA',0,GH+16);
+  for(let c=0;c<COLS;c++){const x=c*S+8,y=GH+26,s=S-16;
+    if(c<fill)ctx.drawImage(tileSprite(COLORS[next[c]],SYMS[next[c]]),x,y,s,s*.7);
+    else{ctx.strokeStyle='#2a3150';ctx.lineWidth=1.5;ctx.beginPath();ctx.roundRect(x,y,s,s*.7,6);ctx.stroke()}}
+  drawFx(ctx);
+  if(shown<score)shown+=Math.ceil((score-shown)/6);else shown=score;$('#score').textContent=shown}
+
+start();loop(step,draw);
+</script>
+</body>
+</html>
