@@ -12,6 +12,7 @@
 .orb{position:fixed;left:0;top:0;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;pointer-events:none;z-index:15}
 .bump{animation:bump .22s ease-out}
 @keyframes bump{40%{transform:scale(1.25)}}
+#combo{white-space:nowrap}
 #prog.hot{background:linear-gradient(90deg,#ff7a3d,#ff3b3b)}
 #score{transition:color .15s,text-shadow .15s}
 #score.big{color:var(--accent);text-shadow:0 0 22px rgba(255,204,51,.75)}
@@ -29,7 +30,8 @@
 </div>
 <script src="ortak.js"></script>
 <script>
-const W=360,H=600,R=18,CAP=56,START=28,MIN_FIELD=26,COMBO_S=2.5,FEVER_AT=5,FUSE=10*60,LEVEL_S=20,LIVES=3,KEY='kement3';
+const W=360,H=600,R=18,CAP=56,START=28,MIN_FIELD=26,COMBO_S=2.5,FEVER_AT=5,FUSE=10*60,LEVEL_S=20,LIVES=5,KEY='kement3';
+const POWERS=[[3,'⚡'],[5,'🔥'],[8,'🌈'],[12,'💥']]; // combo streak rewards
 const SNAP=40,NEAR=90,SKIP=15,EDGE=R*.8; // auto-close distance, preview distance, recent trail points ignored, how far the line's "magnet" reaches
 const COLORS=['#ff5d73','#ffd23f','#4f8bff','#3ddc84','#a970ff'];
 const SPR=[...COLORS,'#ffffff'].map(ballSprite); // last one = joker
@@ -38,18 +40,18 @@ const LEVEL_MSG={2:'💣 Bombalar geldi: patlamadan halkala!',3:'🌈 Prizma gel
 const cv=$('#cv'),ctx=cv.getContext('2d'),view=watchCanvas(cv,W,H,6);
 const stars=Array.from({length:44},()=>({x:Math.random()*W,y:Math.random()*H,v:.15+Math.random()*.35,s:.6+Math.random()*1.4}));
 let Rn,lives,dots,spawns,score,disp,shown,combo,maxCombo,biggest,lastHit,gt,lt,level,nextSpawn,lastSpawn,frozenUntil,over,path,live,flashA,flashC,punch,quake,hitstop,
-  edgeA=0,edgeC='#fff',rings,poppers,parts,flashes,ghosts,beatAt,defused,milestone,recordShown,startBest,popN=0,lastArr=0,lastPop=0;
+  edgeA=0,edgeC='#fff',bolts=[],rings,poppers,parts,flashes,ghosts,beatAt,defused,milestone,recordShown,startBest,popN=0,lastArr=0,lastPop=0;
 
 function inPoly(p,poly){let ins=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];
   if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)ins=!ins}return ins}
 function distSeg(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,l=dx*dx+dy*dy||1,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/l,0,1);return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy)}
 const nearEdge=(p,poly)=>{for(let i=0,j=poly.length-1;i<poly.length;j=i++)if(distSeg(p,poly[j],poly[i])<EDGE)return true;return false};
-// what a loop holds. Forgiving: one balloon of another colour is a "stray" that gets flicked out (two or more = mixed),
-// and same-colour balloons sitting right on the line count as inside (fat-finger friendly)
+// what a loop holds: any second colour inside makes it mixed (costs a heart);
+// same-colour balloons sitting right on the line count as inside (fat-finger friendly)
 function judge(poly){const inside=dots.filter(d=>inPoly(d,poly)),cnt={};inside.forEach(d=>{if(d.c>=0)cnt[d.c]=(cnt[d.c]||0)+1});
   const col=Object.keys(cnt).length?+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]:-1,strays=inside.filter(d=>d.c>=0&&d.c!==col);
   const ins=col<0?inside:[...inside,...dots.filter(d=>d.c===col&&!inside.includes(d)&&nearEdge(d,poly))];
-  return{ins,col,strays,catch:ins.filter(d=>!strays.includes(d)),mixed:strays.length>1||strays.length===1&&cnt[col]<2}}
+  return{ins,col,strays,catch:ins.filter(d=>!strays.includes(d)),mixed:strays.length>0}}
 // where segment ab crosses segment cd (strictly inside both), or null
 function segX(a,b,c,d){const r1=b.x-a.x,r2=b.y-a.y,s1=d.x-c.x,s2=d.y-c.y,den=r1*s2-r2*s1;if(Math.abs(den)<1e-9)return null;
   const t=((c.x-a.x)*s2-(c.y-a.y)*s1)/den,u=((c.x-a.x)*r2-(c.y-a.y)*r1)/den;return t>0&&t<1&&u>0&&u<1?{x:a.x+t*r1,y:a.y+t*r2}:null}
@@ -57,15 +59,15 @@ const area=poly=>{let a=0;for(let i=0,j=poly.length-1;i<poly.length;j=i++)a+=(po
 // self-check: loop geometry, crossing detection, the one-stray rule, the line magnet
 {const sq=[{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}];console.assert(inPoly({x:50,y:50},sq)&&!inPoly({x:150,y:50},sq)&&area(sq)===1e4,'inPoly/area');
  const X=segX({x:0,y:0},{x:10,y:10},{x:0,y:10},{x:10,y:0});console.assert(X&&X.x===5&&X.y===5&&!segX({x:0,y:0},{x:1,y:0},{x:0,y:1},{x:1,y:1}),'segX');
- dots=[{x:30,y:30,c:0},{x:60,y:60,c:0},{x:40,y:70,c:1}];console.assert(!judge(sq).mixed&&judge(sq).catch.length===2,'one stray is forgiven');
- dots.push({x:105,y:50,c:0},{x:140,y:50,c:0});console.assert(judge(sq).catch.length===3,'same colour on the line counts, far away does not');
- dots.push({x:70,y:30,c:2});console.assert(judge(sq).mixed,'two strays = mixed')}
+ dots=[{x:30,y:30,c:0},{x:60,y:60,c:0},{x:50,y:40,c:-1}];console.assert(!judge(sq).mixed&&judge(sq).catch.length===3,'one colour + joker is clean');
+ dots.push({x:105,y:50,c:0},{x:140,y:50,c:0});console.assert(judge(sq).catch.length===4,'same colour on the line counts, far away does not');
+ dots.push({x:40,y:70,c:1});console.assert(judge(sq).mixed,'any second colour = mixed')}
 
 // the day's stream of balloons (same for everyone); specials unlock with levels
 const ncol=()=>level>=5?5:4;
 function newItem(){const r=Rn(),c=Rn()*ncol()|0;let p=.06;if(r<p)return{c:-1,sp:'joker'};
   if(level>=2){p+=.07;if(r<p)return{c,sp:'bomb',fuse:FUSE}}p+=.025;if(r<p)return{c,sp:'ice'};if(level>=3){p+=.02;if(r<p)return{c,sp:'prism'}}return{c,sp:''}}
-function placeItem(it,x,y){if(it.c>=0&&Rn()<.6){let nd=90,near=null;for(const o of dots)if(o.c>=0){const q=Math.hypot(o.x-x,o.y-y);if(q<nd){nd=q;near=o}}if(near)it={...it,c:near.c}}return it} // colours like company
+function placeItem(it,x,y){if(it.c>=0&&Rn()<.5){let nd=90,near=null;for(const o of dots)if(o.c>=0){const q=Math.hypot(o.x-x,o.y-y);if(q<nd){nd=q;near=o}}if(near)it={...it,c:near.c}}return it} // colours like company
 function freeSpot(){let x,y;for(let k=0;k<25;k++){x=R+Rn()*(W-2*R);y=R+Rn()*(H-2*R);
   if(dots.every(o=>Math.hypot(o.x-x,o.y-y)>2*R+8)&&spawns.every(o=>Math.hypot(o.x-x,o.y-y)>2*R+8))break}return[x,y]}
 const makeDot=(it,x,y,sz=.2)=>({...it,x,y,vx:(Rn()-.5)*.5,vy:(Rn()-.5)*.5,hot:0,ph:Rn()*6.28,sz,sq:0,kx:0,ky:0});
@@ -76,11 +78,11 @@ const crowd=()=>(dots.length+spawns.length)/CAP, feverOn=()=>combo>=FEVER_AT, co
 function start(){Rn=rng(DAY+'-'+KEY);lives=LIVES;startBest=bestOf(KEY);dots=[];spawns=[];level=1;gt=lt=0;
   for(let i=0;i<START;i++){const[x,y]=freeSpot();dots.push(makeDot(placeItem(newItem(),x,y),x,y,1))}
   nextSpawn=1.2;lastSpawn=0;frozenUntil=0;score=disp=shown=combo=maxCombo=biggest=lastHit=flashA=punch=quake=hitstop=beatAt=defused=0;milestone=1500;recordShown=over=false;path=live=null;
-  rings=[];poppers=[];parts=[];flashes=[];ghosts=[];flashC='#fff';hud()}
+  rings=[];poppers=[];parts=[];flashes=[];ghosts=[];bolts=[];flashC='#fff';hud()}
 const bump=el=>{el.classList.remove('bump');void el.offsetWidth;el.classList.add('bump')};
 function hud(){$('#best').textContent=Math.max(score,bestOf(KEY));$('#lvl').textContent=level;
   $('#sub').textContent=['❤️'.repeat(lives)+'🖤'.repeat(LIVES-lives),TARGET&&(score>TARGET?'✅ Hedefi geçtin':'🎯 Hedef '+TARGET)].filter(Boolean).join(' · ');
-  const cb=$('#combo');cb.textContent=(feverOn()?'🔥 ATEŞ x2 · ':'')+'KOMBO x'+combo;cb.classList.toggle('on',combo>1);
+  const cb=$('#combo');cb.textContent=(feverOn()?'🔥x2 · ':'')+'KOMBO x'+combo+' → '+nextPower();cb.classList.toggle('on',combo>0);
   cb.style.background=feverOn()?'linear-gradient(90deg,#ff7a3d,#ff3d6e)':''}
 
 // a glowing orb flies on an arc from where a balloon popped to the score
@@ -105,7 +107,7 @@ function addPoint(p){if(!path)return;const l=path[path.length-1];if(Math.hypot(p
 function nearClose(max=NEAR){if(!path||path.length<=SKIP)return null;const tip=path.at(-1);let best=-1,bd=max;
   for(let i=0;i<path.length-SKIP;i++){const d=Math.hypot(path[i].x-tip.x,path[i].y-tip.y);if(d<bd){bd=d;best=i}}return best<0?null:{i:best,d:bd,poly:path.slice(best)}}
 const catchable=j=>!j.mixed&&(j.catch.length>=2||j.catch.some(d=>d.sp&&d.sp!=='joker'));
-function closeLoop(poly){if(over||area(poly)<350)return;resolve(poly)} // ignore tiny jitter loops
+function closeLoop(poly){if(over||area(poly)<900)return;resolve(poly)} // ignore tiny accidental loops
 
 const loopColor=j=>j.mixed?'#ff3b3b':j.catch.length>1?(j.col>=0?COLORS[j.col]:'#ffffff'):'#c8ccff';
 function trail(p){const c=live?loopColor(live):`hsl(${performance.now()/4%360},90%,70%)`;
@@ -113,9 +115,10 @@ function trail(p){const c=live?loopColor(live):`hsl(${performance.now()/4%360},9
 
 function resolve(poly){const j=judge(poly);if(!j.ins.length)return;
   const cx=j.ins.reduce((s,d)=>s+d.x,0)/j.ins.length,cy=j.ins.reduce((s,d)=>s+d.y,0)/j.ins.length;
-  if(j.mixed){combo=0;j.ins.forEach(d=>d.hot=24);float('Karışık!',cx,cy,'#ff5d73',26);sweep(220,110,.2,'sawtooth',.06);buzz([100,50,100]);ghosts.push({pts:poly,col:'#ff3b3b',t:0});hud();return}
+  if(j.mixed){combo=0;lives--;j.ins.forEach(d=>d.hot=30);ghosts.push({pts:poly,col:'#ff3b3b',t:0}); // mixing colours costs a heart
+    float('💔 KARIŞIK! −1 can',clamp(cx,120,W-120),cy,'#ff5d73',28);flashA=.35;flashC='#ff3b3b';quake=10;sweep(300,80,.4,'sawtooth',.1);buzz([150,60,150]);hud();
+    if(lives<=0)gameOver('mixed');return}
   const got=j.catch;if(got.length<2&&!got.some(d=>d.sp&&d.sp!=='joker'))return; // a lone plain balloon is worth nothing; a lone special is fine
-  for(const d of j.strays){const a=Math.atan2(d.y-cy,d.x-cx);d.kx=Math.cos(a)*7;d.ky=Math.sin(a)*7;d.hot=16}
   // specials: bomb blasts its surroundings, prism takes its whole colour, ice freezes; they can set each other off
   const kill=new Set(got),fired=[];
   for(let grew=true;grew;){grew=false;for(const d of[...kill])if(!fired.includes(d)&&(d.sp==='bomb'||d.sp==='prism'||d.sp==='ice')){fired.push(d);if(d.sp==='ice')continue;
@@ -137,7 +140,20 @@ function resolve(poly){const j=judge(poly);if(!j.ins.length)return;
   setTimeout(()=>explode(cx,cy,col,k,gain),(3+n*3+4)*17); // the finale, right after the last pop
   sweep(300,700,.12,'sine',.05);if(combo>1)bump($('#combo'));
   if(combo===FEVER_AT)setTimeout(()=>{float('🔥 ATEŞ MODU! x2',W/2,H*.24,'#ff7a3d',32);sweep(300,1200,.45,'square',.05);quake=8;fireworks(4);buzz([120,60,120,60,300])},260);
-  milestones();hud()}
+  if(k>=8&&lives<LIVES){lives++;setTimeout(()=>{float('+1 ❤️',W/2,H*.4,'#ff5d73',34);beep(880,.15,'triangle',.08);setTimeout(()=>beep(1320,.2,'triangle',.07),120);buzz([40,40,120])},300)} // a huge loop earns a heart back
+  comboPower();milestones();hud()}
+
+// streak rewards: free blasts at combo 3 (⚡ lightning), 8 (🌈 the most common colour), 12 and every 5 after (💥 the middle); combo 5 is fever
+function comboPower(){const each=15*Math.min(combo,10);
+  const blast=(list,label,color,delay=8)=>{if(!list.length)return;list.forEach((d,i)=>poppers.push({...d,t:delay+i*2,i:i%11,pts:each}));dots=dots.filter(d=>!list.includes(d));
+    score+=each*list.length;keepBest(KEY,score);setTimeout(()=>banner(label,color),120)};
+  if(combo===3){const t=[...dots].sort(()=>Math.random()-.5).slice(0,4);t.forEach(d=>bolts.push({x:d.x,y:d.y,t:0,seed:Math.random()}));
+    blast(t,'⚡ ŞİMŞEK!','#9be7ff',6);flashA=.35;flashC='#bfe9ff';sweep(2200,90,.35,'sawtooth',.09);buzz([40,20,40,20,120])}
+  else if(combo===8){const cnt={};dots.forEach(d=>{if(d.c>=0)cnt[d.c]=(cnt[d.c]||0)+1});const c=+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0];
+    blast(dots.filter(d=>d.c===c).sort((a,b)=>a.y-b.y),'🌈 GÖKKUŞAĞI!',COLORS[c]);rings.push({x:W/2,y:H/2,r:R,max:W,col:COLORS[c],t:0});fireworks(2);buzz([50,30,50,30,50,30,180])}
+  else if(combo>=12&&(combo-12)%5===0){const dc=d=>Math.hypot(d.x-W/2,d.y-H/2);blast(dots.filter(d=>dc(d)<170).sort((a,b)=>dc(a)-dc(b)),'💥 SÜPER PATLAMA!','#ff7a3d');
+    rings.push({x:W/2,y:H/2,r:R,max:W,col:'#ff7a3d',t:0});quake=16;hitstop=5;fireworks(4);popSfx(.6,300,.4);buzz([150,50,150,50,300])}}
+const nextPower=()=>{for(const[c,i]of POWERS)if(combo<c)return i+c;return '💥'+(12+5*Math.ceil((combo-11)/5))};
 
 // one balloon bursting; the burst style rotates so a chain never looks the same twice
 function balloonPop(p){const c=colOf(p),style=popN++%4,rnd=Math.random;
@@ -160,7 +176,8 @@ function fwBurst(x,y,color){const cols=[color,'#ffffff',COLORS[Math.random()*5|0
   for(let i=0;i<46;i++){const a=i/46*6.283,v=2.2+Math.random()*2.6;parts.push({t:'spark',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:.05,drag:.97,rot:0,vr:0,life:1.2,decay:.016,color:cols[i%3],s:2.2})}
   for(let i=0;i<8;i++){const a=Math.random()*6.283,v=1+Math.random()*2;parts.push({t:'star',x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,g:.04,drag:.97,rot:a,vr:.15,life:1,decay:.018,color:'#ffe58a',s:5})}
   rings.push({x,y,r:4,max:70,col:color,t:0});flashes.push({x,y,t:0});popSfx(.45,600+Math.random()*400,.25);buzz(60)}
-function banner(text,color){float(text,W/2,H*.33,color,40);sweep(600,1800,.35,'triangle',.07);buzz([40,30,40,30,120])}
+let bannerSlot=0,bannerAt=0; // banners that arrive together stack downwards instead of overlapping
+function banner(text,color){const now=performance.now();bannerSlot=now-bannerAt<1100?(bannerSlot+1)%3:0;bannerAt=now;float(text,W/2,H*.33+bannerSlot*50,color,32);sweep(600,1800,.35,'triangle',.07);buzz([40,30,40,30,120])}
 function milestones(){while(score>=milestone){banner('⭐ '+milestone+' PUAN!','#ffcc33');fireworks(2);milestone+=milestone<6000?1500:3000}
   if(!recordShown&&startBest>0&&score>startBest){recordShown=true;setTimeout(()=>{banner('🏆 YENİ REKOR!','#ff7ad9');fireworks(5)},400)}}
 function explode(cx,cy,col,n,gain){
@@ -190,10 +207,10 @@ function overflow(){lives--;hud();if(lives<=0)return gameOver();
   rings.push({x:W/2,y:H/2,r:R,max:W,col:'#ff5d73',t:0});flashA=.5;flashC='#ff3b3b';quake=14;hitstop=6;sweep(400,90,.6,'sawtooth',.12);buzz([200,80,200,80,350]);hud()}
 function levelUp(){float('SEVİYE '+level,W/2,H*.4,'#26c6da',42);if(LEVEL_MSG[level])float(LEVEL_MSG[level],W/2,H*.4+42,'#fff',16);
   sweep(400,1600,.5,'triangle',.08);fireworks(5);buzz([80,50,80,50,220]);bump($('#lvl'));hud()}
-function gameOver(){over=true;path=live=null;float('ALAN DOLDU!',W/2,H*.42,'#ff5d73',38);sweep(500,80,.8,'sawtooth',.1);buzz([250,80,250,80,450]);quake=14;
+function gameOver(why){over=true;path=live=null;float(why==='mixed'?'CAN BİTTİ!':'ALAN DOLDU!',W/2,H*.42,'#ff5d73',38);sweep(500,80,.8,'sawtooth',.1);buzz([250,80,250,80,450]);quake=14;
   [...dots].sort((a,b)=>a.y-b.y).forEach((d,i)=>poppers.push({...d,t:30+i*2,i:i%11,pts:0}));const k=dots.length;dots=[];spawns=[];
   const rec=score>startBest;if(rec)setTimeout(()=>fireworks(6),900);
-  setTimeout(()=>{disp=score;finish({key:KEY,score,prev:startBest,title:rec?'Yeni rekor! 🎉':'Alan doldu!',chips:['📈 seviye '+level,'⭕ en büyük: '+biggest,'🔥 x'+maxCombo+' kombo','💣 '+defused+' bomba'],
+  setTimeout(()=>{disp=score;finish({key:KEY,score,prev:startBest,title:rec?'Yeni rekor! 🎉':why==='mixed'?'Canın bitti!':'Alan doldu!',chips:['📈 seviye '+level,'⭕ en büyük: '+biggest,'🔥 x'+maxCombo+' kombo','💣 '+defused+' bomba'],
     card:`📈 Sv ${level} · ⭕ ${biggest}'li · 🔥 x${maxCombo}\n`,again:start})},Math.max(rec?2600:1800,(30+k*2)*17+600))}
 
 function step(){if(!dots)return;if(hitstop>0){hitstop--;return} // hit-stop: the world holds its breath for a beat
@@ -211,14 +228,14 @@ function step(){if(!dots)return;if(hitstop>0){hitstop--;return} // hit-stop: the
     if(d.sp==='bomb'&&!over){d.fuse--;if(d.fuse<=120&&d.fuse%20===0){beep(1500,.03,'square',.03);buzz(14)}if(d.fuse<=0)bombBlow(d)}}
   if(!frozen)for(let i=0;i<dots.length;i++)for(let j=i+1;j<dots.length;j++){const a=dots[i],b=dots[j],dx=b.x-a.x,dy=b.y-a.y,dd=Math.hypot(dx,dy)||1,o=2*R+4-dd;
     if(o>0){const k=o/dd*.25;a.x-=dx*k;a.y-=dy*k;b.x+=dx*k;b.y+=dy*k} // never stack
-    else if(a.c===b.c&&a.c>=0&&dd<110){const k=.002;a.x+=dx*k;a.y+=dy*k;b.x-=dx*k;b.y-=dy*k}} // same colours drift together
+    else if(a.c===b.c&&a.c>=0&&dd<110){const k=.0015;a.x+=dx*k;a.y+=dy*k;b.x-=dx*k;b.y-=dy*k}} // same colours drift together
   for(const d of dots){d.x=clamp(d.x,R,W-R);d.y=clamp(d.y,R,H-R)}
   // close to your own trail: preview what closing the loop would catch
   const nc=nearClose();if(nc){const j=judge(nc.poly),cnt=j.mixed?0:j.catch.length;
     if(cnt>=2&&cnt>(live?.cnt||0)){beep(500+cnt*70,.04,'sine',.05);buzz(25)}live={...j,cnt,to:path[nc.i]}}else live=null;
   for(const p of poppers)if(--p.t<=0)balloonPop(p);poppers=poppers.filter(p=>p.t>0);
   for(const r of rings){r.t++;if(r.t>0)r.r+=(r.max-r.r)*.18}rings=rings.filter(r=>r.t<28);
-  for(const g of ghosts)g.t++;ghosts=ghosts.filter(g=>g.t<22);
+  for(const g of ghosts)g.t++;ghosts=ghosts.filter(g=>g.t<22);for(const b of bolts)b.t++;bolts=bolts.filter(b=>b.t<14);
   for(const f of flashes)f.t++;flashes=flashes.filter(f=>f.t<(f.big?9:6));
   flashA*=.86;punch*=.85;quake*=.86;edgeA*=.92;
   const fever=feverOn();
@@ -275,13 +292,15 @@ function draw(){const v=view;if(!v.s||!dots)return;const now=performance.now(),f
     ctx.strokeStyle='rgba(255,255,255,.9)';ctx.lineWidth=2;ctx.beginPath();ctx.arc(x,p.y,r+3,0,6.283);ctx.stroke()}
   for(const f of flashes){const k=f.t/(f.big?9:6);ctx.globalAlpha=1-k;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(f.x,f.y,R*(f.big?2.2:1.1)*(1+k*.8),0,6.283);ctx.fill()}ctx.globalAlpha=1;
   for(const r of rings)if(r.t>0){ctx.globalAlpha=1-r.t/28;ctx.strokeStyle=r.col;ctx.lineWidth=6*(1-r.t/28)+1;ctx.beginPath();ctx.arc(r.x,r.y,r.r,0,6.283);ctx.stroke()}ctx.globalAlpha=1;
+  for(const b of bolts){ctx.globalAlpha=1-b.t/14;ctx.strokeStyle='#e6f7ff';ctx.shadowColor='#7fd8ff';ctx.shadowBlur=18;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(b.x+b.seed*60-30,-10);
+    for(let s=1;s<=8;s++)ctx.lineTo(b.x+(s<8?Math.sin(b.seed*99+s*7.3)*26*(1-s/8):0),-10+(b.y+10)*s/8);ctx.stroke();ctx.shadowBlur=0}ctx.globalAlpha=1; // lightning bolts
   drawParts();drawFx(ctx);
   if(combo>0&&!over){ctx.fillStyle=fever?'#ff7a3d':'#ffcc33';ctx.fillRect(0,0,W*Math.max(0,1-(gt-lastHit)/COMBO_S),4)} // combo fuse
   if(danger){const g=ctx.createRadialGradient(W/2,H/2,H*.3,W/2,H/2,H*.75);g.addColorStop(0,'rgba(255,40,40,0)');g.addColorStop(1,`rgba(255,40,40,${.18+.14*Math.sin(now/(c>.92?80:140))})`);ctx.fillStyle=g;ctx.fillRect(0,0,W,H)}
   if(flashA>.01){ctx.globalAlpha=flashA;ctx.fillStyle=flashC;ctx.fillRect(0,0,W,H);ctx.globalAlpha=1}
   if(edgeA>.02){ctx.globalAlpha=edgeA;ctx.strokeStyle=edgeC;ctx.lineWidth=14;ctx.shadowColor=edgeC;ctx.shadowBlur=26;ctx.strokeRect(0,0,W,H);ctx.shadowBlur=0;ctx.globalAlpha=1}
   if(gt<6&&!over&&score===0){ctx.globalAlpha=.7+.3*Math.sin(now/300);ctx.fillStyle='#fff';ctx.font='700 16px system-ui';ctx.fillText('✍️ Aynı renk balonların etrafına halka çiz',W/2,H-50);
-    ctx.font='600 13px system-ui';ctx.fillText('Çizgine yaklaşınca kendiliğinden kapanır · 💣 patlamadan yakala',W/2,H-26);ctx.globalAlpha=1}
+    ctx.font='600 13px system-ui';ctx.fillText('Başka renk karışırsa −1 can · 💣 patlamadan yakala',W/2,H-26);ctx.globalAlpha=1}
   ctx.restore();
   ctx.lineWidth=fever?2.5:1.5;ctx.strokeStyle=fever?`hsl(${now/3%360},100%,60%)`:danger?'#ff3b3b':'#2a3150';ctx.beginPath();ctx.roundRect(0,0,W,H,18);ctx.stroke();
   if(shown<disp)shown+=Math.ceil((disp-shown)/5);else shown=disp;$('#score').textContent=shown;
