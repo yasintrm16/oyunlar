@@ -42,7 +42,17 @@ if(document.body.classList.contains('game')){
   $('#app').insertAdjacentHTML('afterbegin',`<div class="top"><a href="./" aria-label="Tüm oyunlar">‹</a><span class="t"><b>${document.title}</b> · ${DAY_LABEL}${DAY===TODAY?' · Günlük':''}</span><button id="mute" aria-label="Sesi aç/kapat"></button></div>`);
   document.body.insertAdjacentHTML('beforeend',`<div id="toast"></div><div id="over" class="ov" hidden><div class="card"><p id="oTitle"></p><b id="oScore"></b><span id="oUnit"></span><div class="chips" id="oChips"></div><p id="oMsg"></p><button id="share" class="btn pri">Meydan oku 📤</button><button id="again" class="btn">Tekrar oyna ↻</button><a class="lnk" href="./">‹ Diğer oyunlar</a></div></div>`);
   const m=$('#mute'),set=()=>m.textContent=muted?'🔇':'🔊';set();m.onclick=()=>{muted=!muted;store.set('mute',muted?'1':'0');set()};
+  document.body.insertAdjacentHTML('beforeend',`<div id="pause" class="ov pause" hidden><div class="card"><p class="pt">⏸ Oyun durdu</p><p class="ps">Kaldığın yerden devam edebilirsin.</p><button id="resume" class="btn pri">▶ Devam et</button><a class="btn" href="./">Oyundan çık</a></div></div>`);
+  // accidental exits on phones: no pull-to-refresh or page scroll, fullscreen where the browser allows it,
+  // and the back swipe or leaving the app opens the pause screen instead of losing the game
+  let guarded=false,fsTried=false;const guard=()=>{if(!guarded){guarded=true;history.pushState({game:1},'')}}; // only sticks when pushed from a tap
+  addEventListener('popstate',()=>{guarded=false;pauseGame()});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseGame()});
+  document.addEventListener('touchmove',e=>{if(e.cancelable)e.preventDefault()},{passive:false});
+  addEventListener('pointerdown',e=>{guard();if(e.pointerType==='touch'&&!fsTried&&!document.fullscreenElement){fsTried=true;document.documentElement.requestFullscreen?.({navigationUI:'hide'})?.catch(()=>{})}},{capture:true});
+  $('#resume').onclick=()=>{paused=false;$('#pause').hidden=true;guard()};
 }
+function pauseGame(){if(!$('#pause')||!$('#over').hidden)return;paused=true;$('#pause').hidden=false}
 
 // end screen: saves the day's best, compares with the friend's target, wires share/again
 // prev: the best before this game started (a game that saves its best while playing passes it in)
@@ -59,7 +69,8 @@ function finish({key,score,title,chips,fmt=String,unit='puan',card='',again,prev
   $('#over').hidden=false;beep(score>prev?784:330,.25,'triangle')}
 
 // fixed 60 Hz simulation whatever the screen refresh rate, so every phone plays the same game
-function loop(step,draw){let acc=0,last=performance.now();const f=t=>{acc+=Math.min(100,t-last);last=t;while(acc>=1000/60){step();acc-=1000/60}draw();requestAnimationFrame(f)};requestAnimationFrame(f)}
+let paused=false; // while the pause screen is up the simulation stands still (drawing goes on)
+function loop(step,draw){let acc=0,last=performance.now();const f=t=>{acc+=Math.min(100,t-last);last=t;if(paused)acc=0;while(acc>=1000/60){step();acc-=1000/60}draw();requestAnimationFrame(f)};requestAnimationFrame(f)}
 // keeps a canvas crisp at its CSS size; view.s/ox/oy map a fixed W×H world into it (H=0: fit width only; pad = world-unit margin kept visible around it)
 function watchCanvas(cv,W,H,pad=0){const view={},fit=()=>{const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d);
   const s=H?Math.min(r.width/(W+2*pad),r.height/(H+2*pad)):r.width/(W+2*pad);Object.assign(view,{s,d,r,ox:(r.width-W*s)/2,oy:H?(r.height-H*s)/2:0})};
@@ -93,7 +104,9 @@ const float=(text,x,y,color='#fff',size=22)=>floats.push({text,x,y,color,size,t:
 function drawFx(ctx){
   for(const p of sparks){p.x+=p.vx;p.y+=p.vy;p.vx*=.94;p.vy*=.94;p.life-=.035;ctx.globalAlpha=Math.max(0,p.life);ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,2+p.life*2.5,0,6.283);ctx.fill()}
   ctx.textAlign='center';ctx.textBaseline='middle';ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=8;
-  for(const f of floats){f.t++;const k=f.t/56;ctx.globalAlpha=Math.max(0,1-k*k);ctx.font=`800 ${f.size*(k<.15?.6+k/.15*.4:1)}px system-ui,sans-serif`;ctx.fillStyle=f.color;ctx.fillText(f.text,f.x,f.y-k*50)}
+  for(const f of floats){f.t++;const k=f.t/56,z=k<.12?.5+k/.12*.8:k<.22?1.3-(k-.12)/.1*.3:1; // pops in big, settles, floats up
+    ctx.globalAlpha=Math.max(0,1-k*k);ctx.font=`900 ${f.size*z}px system-ui,sans-serif`;ctx.lineJoin='round';ctx.lineWidth=Math.max(3,f.size*.16);ctx.strokeStyle='rgba(10,12,24,.85)';
+    ctx.strokeText(f.text,f.x,f.y-k*50);ctx.fillStyle=f.color;ctx.fillText(f.text,f.x,f.y-k*50)}
   ctx.globalAlpha=1;ctx.shadowBlur=0;
   for(let i=sparks.length;i--;)if(sparks[i].life<=0)sparks.splice(i,1);
   for(let i=floats.length;i--;)if(floats[i].t>56)floats.splice(i,1)}
